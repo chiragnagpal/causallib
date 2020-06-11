@@ -48,11 +48,9 @@ class TestHemmEstimator(unittest.TestCase):
             outcome_model = BalancedNet(Xte.shape[1], Xte.shape[1], 1)
 
         estimator = HEMM(
-            Xte.shape[1],
             comp,
             mu=mu,
             std=std,
-            bc=6,
             lamb=0.,
             spread=0.,
             outcome_model=outcome_model,

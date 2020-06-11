@@ -29,70 +29,81 @@ from copy import deepcopy
 
 
 class HEMM(torch.nn.Module):
-    """This is the model defintion. The model has two parts:
+    """This is the model definition. The model has two parts:
 
       1. the subgroup discovery component 
       2. the outcome prediction from the subgroup assignment and the interaction with confounders through an MLP. 
     
     Args:
-        D_in: the size of the features of the data
         K: number of components to discover.
         homo:
         mu: initialize the components with means of the training data.
         std: initialize the components with std dev of the training data.
-        bc: the first bc components are considered bernoulli variables
         lamb: strength of the beta(0.5, 0.5) prior on the bernoulli variables
         spread: how far should the components be initialized from there means.
         outcomeModel: 'linear' to specify a linear outcome function. Or pass another Torch.model as the outcome model.
         sep_heads: Setting false will force the adjustment of Confounding to be same independent of treatment assignment.
     """
 
-    def __init__(self, D_in, K, homo=True, mu=None, std=None, bc=0, lamb=0.0001, spread=0.1, outcomeModel='linear', sep_heads=True):
+    def __init__(self, K, homo=True, mu=None, std=None, lamb=0.0001, spread=0.1,
+                 outcomeModel='linear', sep_heads=True):
 
         super(HEMM, self).__init__()
-        self.bc = bc
         self.lamb = lamb
         self.homo = homo
         self.K = K 
         self.sep_heads = sep_heads
-        
-        self.tc = None
-        
-        lindim = D_in
 
-        if outcomeModel == 'linear':
-            outcomeModel = nn.Linear(lindim, 2)
+        self.spread = spread
+        self.outcome_model = outcomeModel
+        self.mu = mu
+        self.std = std
+
+        # Will be initialized once data introduced:
+        self._is_initialized = False  # Whether model has been initialized
+        self._bc = None  # Binary mask of which columns are binary columns, rest will consider continuous
+        self.p = None
+        self.alph = None
+        self.treat = None
+        self.expert = None
+
+
+    def initialize_model(self, mu, std):
+        """Data-dependent initialization. Definitions required once we know how the data looks like."""
+        if self.outcome_model == 'linear':
+            self.outcome_model = nn.Linear(self._bc.size, 2)  # Assumes 2 treatment values
 
         if mu is not None:
-            p = torch.from_numpy(np.repeat(mu[:, bc:], self.K, axis=0))
-            mu = torch.from_numpy(np.repeat(mu[:, :bc], self.K, axis=0))
+            p = torch.from_numpy(np.repeat(mu[:, self._bc], self.K, axis=0))
+            mu = torch.from_numpy(np.repeat(mu[:, ~self._bc], self.K, axis=0))
         else:
-            p = 0.5 * torch.ones(self.K, D_in - bc)
-            mu = torch.zeros(self.K, bc)
+            p = 0.5 * torch.ones(self.K, self._bc.sum())
+            mu = torch.zeros(self.K, (~self._bc).sum())
 
         if std is not None:
-            std = torch.from_numpy(np.repeat(std[:, :bc], self.K, axis=0))
+            std = torch.from_numpy(np.repeat(std[:, ~self._bc], self.K, axis=0))
         else:
-            std = torch.ones(self.K, bc)
+            std = torch.ones(self.K, (~self._bc).sum())
 
         for i in range(self.K):
-            mu[i] = mu[i] + spread * (torch.rand_like(mu[i]) - 0.5)
-            std[i] = std[i] + spread * (torch.rand_like(std[i]) - 0.5)
-            p[i] = p[i] + spread * (torch.rand_like(p[i]) - 0.5)
-
+            mu[i] = mu[i] + self.spread * (torch.rand_like(mu[i]) - 0.5)
+            std[i] = std[i] + self.spread * (torch.rand_like(std[i]) - 0.5)  # TODO: why -0.5? can cause negative std
+            p[i] = p[i] + self.spread * (torch.rand_like(p[i]) - 0.5)
         self.mu = nn.ParameterList(nn.Parameter(mu[i]) for i in range(self.K))
         self.std = nn.ParameterList(nn.Parameter(std[i]) for i in range(self.K))
         self.p = nn.ParameterList(nn.Parameter(p[i]) for i in range(self.K))
-        self.alph = nn.Parameter(torch.ones(self.K))
+        self.alph = nn.Parameter(torch.ones(self.K).double())
 
         treat = torch.abs(torch.rand(self.K))
         self.treat = nn.Parameter(treat.double())
-        if homo:
-            expert = [deepcopy(outcomeModel) for i in range(1)]
-        else:
-            expert = [deepcopy(outcomeModel) for i in range(self.K)]
 
+        if self.homo:
+            expert = [deepcopy(self.outcome_model)]
+        else:
+            expert = [deepcopy(self.outcome_model) for i in range(self.K)]
         self.expert = nn.ModuleList(expert)
+
+        self._is_initialized = True
 
     @staticmethod
     def gaussian_pdf(x, mu, std):
@@ -137,10 +148,8 @@ class HEMM(torch.nn.Module):
             
         selector2 = range(len(selector))
 
-        # TODO: Consider a slightly more general binary-variable mask vector indicated which columns are binary,
-        #       rather than force certain structure on the input.
-        xg, xb = x[:, :self.bc], x[:, self.bc:]
-
+        xb = x[:, self._bc]
+        xg = x[:, ~self._bc]
         # compute q(Z)
         gate_output = []
         for i in range(self.K):
@@ -195,7 +204,8 @@ class HEMM(torch.nn.Module):
                 return output
 
     def fit(self, train, epochs=100, batch_size=10, lr=1e-3, wd=0, ltype='log', dev=None, metric='AP', response='bin',
-            use_p_correction=True, imb_fun='mmd2_lin', p_alpha=1e-4):
+            use_p_correction=True, imb_fun='mmd2_lin', p_alpha=1e-4,
+            init_mu=None, init_std=None):
         """This method uses ELBO to perform parameter updates using a first order optimizer routing.
 
         Args:
@@ -215,10 +225,22 @@ class HEMM(torch.nn.Module):
             use_p_correction (bool): Whether to use population size p(treated) in imbalance penalty (IPM).
             imb_fun (str): Which imbalance penalty to use ('mmd_lin', 'wass').
             p_alpha (float): Imbalance regularization parameter.
+            init_mu (np.ndarray): initialize the components with provided means.
+            init_std (np.ndarray): initialize the components with provieded std.
         """
         # TODO: Consider rename `dev` to `val` to correspond with Keras `validation_data` parameters `x_val, y_val`.
         #       https://keras.io/models/model/#fit
         x, t, y = train
+
+        binary_columns = torch.all((x == 0) | (x == 1), dim=0)
+        self._bc = binary_columns
+
+        if init_mu is None:
+            init_mu = self.mu
+        if init_std is None:
+            init_std = self.std
+        if not self._is_initialized:
+            self.initialize_model(init_mu, init_std)
 
         if dev is not None:
             xdev, tdev, ydev = dev
