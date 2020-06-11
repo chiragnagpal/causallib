@@ -111,7 +111,7 @@ class HEMM(torch.nn.Module):
         std = std.unsqueeze(0)
 
         gauss_ = -torch.log(std) - torch.div((x - mu.expand(x.shape)) ** 2, 2 * (std ** 2))
-        gauss_ = torch.sum(gauss_, dim=1) - 0.9189 * x.shape[1]  # TODO: what's with the 0.9189?
+        gauss_ = torch.sum(gauss_, dim=1) + np.log(1 / np.sqrt(2 * np.pi)) * x.shape[1]
 
         return gauss_
 
