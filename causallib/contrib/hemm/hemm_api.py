@@ -32,19 +32,16 @@ class HEMM(IndividualOutcomeEstimator):
     """
 
     def __init__(self,
-                 D_in, K, homo=True, mu=None, std=None, bc=0, lamb=1e-4, spread=0.1, outcome_model='linear',
+                 K, homo=True, mu=None, std=None, lamb=1e-4, spread=0.1, outcome_model='linear',
                  sep_heads=True, epochs=100, batch_size=10, learning_rate=1e-3, weight_decay=0.1, elbo_loss=True,
                  metric='AP', response='bin', use_p_correction=True, imb_fun='mmd2_lin', p_alpha=1e-4, random_seed=0):
         """Instantiate estimator.
 
         Args:
-            D_in (int): Size of the features of the data
             K (int): Number of components to discover. (specifcy K-1: eg. For 2 components use K=1)
             homo: 
             mu (float): Initialize the components with means of the training data.
             std (float): Initialize the components with std dev of the training data.
-            bc (int): The first feature in `x` being a bernoulli variables.
-                    Columns 0 up to `bc` should be continuous (gaussian)
             lamb (float): Strength of the beta(0.5, 0.5) prior on the bernoulli variables.
             spread (float): How far should the components be initailized from there means.
             outcome_model (str): 'linear' to specify a linear outcome function.
@@ -81,7 +78,8 @@ class HEMM(IndividualOutcomeEstimator):
         
         torch.manual_seed(random_seed)
 
-        model = HEMMTorch(D_in, K, homo, mu, std, bc, lamb, spread=spread, outcomeModel=outcome_model, sep_heads=sep_heads)
+        model = HEMMTorch(K=K, homo=homo, mu=mu, std=std, lamb=lamb, spread=spread,
+                          outcomeModel=outcome_model, sep_heads=sep_heads)
         model = model.double()
         super(HEMM, self).__init__(learner=model)
 
@@ -156,7 +154,7 @@ class HEMM(IndividualOutcomeEstimator):
         """
         return self.learner.group_sizes(self._as_tensor(X), self._as_tensor(a))
 
-    def fit(self, X, a, y, sample_weight=None, validation_data=None):
+    def fit(self, X, a, y, sample_weight=None, validation_data=None, init_mu=None, init_std=None):
         """Trains a causal model from observed data.
 
         Note: If all dev-data is provided, early stopping criteria will be applied using this data and the metric
@@ -168,13 +166,15 @@ class HEMM(IndividualOutcomeEstimator):
             y (torch.Tensor | pd.Series | np.ndarray): Observed outcome of size (num_subjects,).
             sample_weight: *IGNORED*
             validation_data: tuple of validation set: (X_val, a_val, y_val) corresponding to `X, a, y` above.
+            init_mu (np.ndarray): initialize the components with provided means.
+            init_std (np.ndarray): initialize the components with provided std.
 
         Returns:
             IndividualOutcomeEstimator: A causal weight model with an inner learner fitted.
         """
         ltype = 'log' if self._elbo_loss else None
         if validation_data is not None:
-            validation_data = (self._as_tensor(d) for d in validation_data)
+            validation_data = tuple(self._as_tensor(d) for d in validation_data)
         else:
             validation_data = None
 
@@ -190,7 +190,9 @@ class HEMM(IndividualOutcomeEstimator):
             response=self._response,
             use_p_correction=self._use_p_correction,
             imb_fun=self._imb_fun,
-            p_alpha=self._p_alpha
+            p_alpha=self._p_alpha,
+            init_mu=init_mu,
+            init_std=init_std
         )
 
     @staticmethod
