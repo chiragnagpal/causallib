@@ -45,8 +45,7 @@ class HEMM(torch.nn.Module):
         sep_heads: Setting false will force the adjustment of Confounding to be same independent of treatment assignment.
     """
 
-    def __init__(self, K, homo=True, mu=None, std=None, lamb=0.0001, spread=0.1,
-                 outcomeModel='linear', sep_heads=True):
+    def __init__(self, K, homo=True, lamb=0.0001, spread=0.1, outcomeModel='linear', sep_heads=True):
 
         super(HEMM, self).__init__()
         self.lamb = lamb
@@ -56,19 +55,19 @@ class HEMM(torch.nn.Module):
 
         self.spread = spread
         self.outcome_model = outcomeModel
-        self.mu = mu
-        self.std = std
 
         # Will be initialized once data introduced:
         self._is_initialized = False  # Whether model has been initialized
         self._bc = None  # Binary mask of which columns are binary columns, rest will consider continuous
         self.p = None
+        self.mu = None
+        self.std = None
         self.alph = None
         self.treat = None
         self.expert = None
 
 
-    def initialize_model(self, mu, std):
+    def initialize_model(self, mu=None, std=None):
         """Data-dependent initialization. Definitions required once we know how the data looks like."""
         if self.outcome_model == 'linear':
             self.outcome_model = nn.Linear(self._bc.size, 2)  # Assumes 2 treatment values
@@ -234,11 +233,6 @@ class HEMM(torch.nn.Module):
 
         binary_columns = torch.all((x == 0) | (x == 1), dim=0)
         self._bc = binary_columns
-
-        if init_mu is None:
-            init_mu = self.mu
-        if init_std is None:
-            init_std = self.std
         if not self._is_initialized:
             self.initialize_model(init_mu, init_std)
 
