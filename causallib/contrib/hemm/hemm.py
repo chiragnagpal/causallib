@@ -67,7 +67,7 @@ class HEMM(torch.nn.Module):
         self.expert = None
 
 
-    def initialize_model(self, mu=None, std=None):
+    def _initialize_model(self, mu=None, std=None):
         """Data-dependent initialization. Definitions required once we know how the data looks like."""
         if self.outcome_model == 'linear':
             self.outcome_model = nn.Linear(self._bc.size, 2)  # Assumes 2 treatment values
@@ -234,7 +234,7 @@ class HEMM(torch.nn.Module):
         binary_columns = torch.all((x == 0) | (x == 1), dim=0)
         self._bc = binary_columns
         if not self._is_initialized:
-            self.initialize_model(init_mu, init_std)
+            self._initialize_model(init_mu, init_std)
 
         if dev is not None:
             xdev, tdev, ydev = dev
