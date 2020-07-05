@@ -32,16 +32,14 @@ class HEMM(IndividualOutcomeEstimator):
     """
 
     def __init__(self,
-                 K, homo=True, mu=None, std=None, lamb=1e-4, spread=0.1, outcome_model='linear',
+                 K, homo=True, lamb=1e-4, spread=0.1, outcome_model='linear',
                  sep_heads=True, epochs=100, batch_size=10, learning_rate=1e-3, weight_decay=0.1, elbo_loss=True,
                  metric='AP', response='bin', use_p_correction=True, imb_fun='mmd2_lin', p_alpha=1e-4, random_seed=0):
         """Instantiate estimator.
 
         Args:
-            K (int): Number of components to discover. (specifcy K-1: eg. For 2 components use K=1)
-            homo: 
-            mu (float): Initialize the components with means of the training data.
-            std (float): Initialize the components with std dev of the training data.
+            K (int): Number of components to discover. (specify K-1: eg. For 2 components use K=1)
+            homo:
             lamb (float): Strength of the beta(0.5, 0.5) prior on the bernoulli variables.
             spread (float): How far should the components be initailized from there means.
             outcome_model (str): 'linear' to specify a linear outcome function.
@@ -78,7 +76,7 @@ class HEMM(IndividualOutcomeEstimator):
         
         torch.manual_seed(random_seed)
 
-        model = HEMMTorch(K=K, homo=homo, mu=mu, std=std, lamb=lamb, spread=spread,
+        model = HEMMTorch(K=K, homo=homo, lamb=lamb, spread=spread,
                           outcomeModel=outcome_model, sep_heads=sep_heads)
         model = model.double()
         super(HEMM, self).__init__(learner=model)
@@ -166,8 +164,8 @@ class HEMM(IndividualOutcomeEstimator):
             y (torch.Tensor | pd.Series | np.ndarray): Observed outcome of size (num_subjects,).
             sample_weight: *IGNORED*
             validation_data: tuple of validation set: (X_val, a_val, y_val) corresponding to `X, a, y` above.
-            init_mu (np.ndarray): initialize the components with provided means.
-            init_std (np.ndarray): initialize the components with provided std.
+            init_mu (np.ndarray): Prior initialization of the components with provided means.
+            init_std (np.ndarray): Prior initialization of the components with provided std.
 
         Returns:
             IndividualOutcomeEstimator: A causal weight model with an inner learner fitted.
