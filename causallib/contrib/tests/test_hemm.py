@@ -49,6 +49,8 @@ class TestHemmEstimator(unittest.TestCase):
 
         estimator = HEMM(
             comp,
+            mu=mu,
+            std=std,
             lamb=0.,
             spread=0.,
             outcome_model=outcome_model,
@@ -60,7 +62,7 @@ class TestHemmEstimator(unittest.TestCase):
             response=response,
             imb_fun='wass'
         )
-        estimator.fit(Xtr, Ttr, Ytr, validation_data=(Xdev, Tdev, Ydev), init_mu=mu, init_std=std)
+        estimator.fit(Xtr, Ttr, Ytr, validation_data=(Xdev, Tdev, Ydev))
 
         Xtr = data['TRAIN']['x'][:, :, i]
         Ttr = data['TRAIN']['t'][:, i]
